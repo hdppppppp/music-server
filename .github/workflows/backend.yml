@@ -92,6 +92,25 @@ jobs:
               > dist/share-player/index.html
           fi
 
+      - name: 拉取加密层原生产物（Linux + Windows，供传输加密，缺失则明文降级）
+        run: |
+          # 与客户端拉 .so 同款流转：从 tools 固定版本 Release 取两个平台的
+          # taotao_crypto.node，放到 native-loader 会按平台查的
+          # crypto/dist/node/<平台>/。两个都打进 server-dist.zip 与 Docker 镜像，
+          # 这样同一份产物在 Linux 和 Windows 部署都能直接用（native-loader 自动选平台）。
+          # PSK 仍走运行时环境变量（CRYPTO_PSK_*），密钥不进产物。拉不到不阻断。
+          for plat in linux-x64 windows-x64; do
+            mkdir -p "crypto/dist/node/$plat"
+            if curl -fsSL -o "/tmp/node-$plat.zip" \
+                "https://github.com/hdppppppp/tools/releases/download/v2.1.0/node-$plat.zip"; then
+              unzip -qo "/tmp/node-$plat.zip" -d "crypto/dist/node/$plat"
+              echo "已拉取 taotao_crypto.node（$plat, v2.1.0）"
+            else
+              echo "::warning::拉取 $plat 加密产物失败，该平台传输加密将明文降级"
+            fi
+          done
+          ls -R crypto/dist/node || true
+
       - name: 重置验证库
         run: node tools/reset-db.mjs "$DATABASE_URL"
 
@@ -125,8 +144,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # 契约全绿才走到这里；dist 含管理后台与分享播放器，可直接部署。
-          zip -qr server-dist.zip dist
+          # 契约全绿才走到这里；dist 含管理后台与分享播放器，
+          # crypto/ 含 linux-x64 的 taotao_crypto.node（若拉到），一并打包可直接部署。
+          zip -qr server-dist.zip dist crypto
           gh release view server-dist-latest >/dev/null 2>&1 || \
             gh release create server-dist-latest --prerelease \
               --title "后端 dist 最新构建" \
